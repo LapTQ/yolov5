@@ -190,10 +190,31 @@ class ComputeLoss:
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
                 pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
 
+                # laptq
+                """
+                >>> print(('pi[b, a, gj, gi]', pi[b, a, gj, gi].shape))
+                ('pi[b, a, gj, gi]', torch.Size([54, 10]))
+                >>> print(('pxy', pxy.shape))
+                ('pxy', torch.Size([54, 2]))
+                >>> print(('pwh', pwh.shape))
+                ('pwh', torch.Size([54, 2]))
+                >>> print(('_', _.shape, (_.min().item(), _.max().item())))
+                ('_', torch.Size([54, 1]), (-7.35546875, -6.0))                            # objectness score???
+                >>> print(('pcls', pcls.shape, (pcls.min().item(), pcls.max().item())))
+                ('pcls', torch.Size([54, 5]), (-2.505859375, -1.046875))                   # class score???
+                """
+
                 # Regression
                 pxy = pxy.sigmoid() * 2 - 0.5
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                # laptq
+                """
+                >>> print(('pbox', pbox.shape))
+                ('pbox', torch.Size([54, 4]))
+                >>> print(('tbox[i]', tbox[i].shape))
+                ('tbox[i]', torch.Size([54, 4]))
+                """
                 iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
                 lbox += (1.0 - iou).mean()  # iou loss
 
