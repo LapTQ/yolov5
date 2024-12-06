@@ -136,12 +136,49 @@ class ComputeLoss:
         self.anchors = m.anchors
         self.device = device
 
+        # laptq
+        """ For a 5-class dataset
+        >>> pprint(('na', self.na))
+        ('na', 3)
+        >>> pprint(('nc', self.nc))
+        ('nc', 5)
+        >>> pprint(('nl', self.nl))
+        ('nl', 3)
+        """
+
     def __call__(self, p, targets):  # predictions, targets
         """Performs forward pass, calculating class, box, and object loss for given predictions and targets."""
+
+        # laptq
+        """ For a 5-class dataset
+        >>> print(('p', type(p), len(p), (p[0].shape, p[1].shape, p[2].shape)))
+        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))    # list: 3 layers x ...
+        >>> pprint(('targets', targets.shape))
+        ('targets', torch.Size([8, 6]))    # 8 boxes x (image,class,x,y,w,h)
+        """
+        
         lcls = torch.zeros(1, device=self.device)  # class loss
         lbox = torch.zeros(1, device=self.device)  # box loss
         lobj = torch.zeros(1, device=self.device)  # object loss
         tcls, tbox, indices, anchors = self.build_targets(p, targets)  # targets
+
+        # laptq
+        """
+        >>> print(('tcls', type(tcls), len(tcls), (tcls[0].shape, tcls[1].shape, tcls[2].shape)))    # list: 3 layer x ...
+        ('tcls', <class 'list'>, 3, (torch.Size([54]), torch.Size([24]), torch.Size([6])))
+        >>> print(('tbox', type(tbox), len(tbox), (tbox[0].shape, tbox[1].shape, tbox[2].shape)))    # list: 3 layer x ...
+        ('tbox', <class 'list'>, 3, (torch.Size([54, 4]), torch.Size([24, 4]), torch.Size([6, 4])))
+        >>> print(('indices', type(indices), len(indices), (type(indices[0]), type(indices[1]), type(indices[2]))))    # list: 3 layer x ...
+        ('indices', <class 'list'>, 3, (<class 'tuple'>, <class 'tuple'>, <class 'tuple'>))
+        >>> print(('indices[0]', type(indices), len(indices[0]), indices[0][0].shape, indices[0][1].shape, indices[0][2].shape, indices[0][3].shape))    # image, anchor, gridy, gridx
+        ('indices[0]', <class 'list'>, 4, torch.Size([54]), torch.Size([54]), torch.Size([54]), torch.Size([54]))
+        >>> print(('indices[1]', type(indices), len(indices[1]), indices[1][0].shape, indices[1][1].shape, indices[1][2].shape, indices[1][3].shape))    # image, anchor, gridy, gridx
+        ('indices[1]', <class 'list'>, 4, torch.Size([24]), torch.Size([24]), torch.Size([24]), torch.Size([24]))
+        >>> print(('indices[2]', type(indices), len(indices[2]), indices[2][0].shape, indices[2][1].shape, indices[2][2].shape, indices[2][3].shape))    # image, anchor, gridy, gridx
+        ('indices[2]', <class 'list'>, 4, torch.Size([6]), torch.Size([6]), torch.Size([6]), torch.Size([6]))
+        >>> print(('anchors', type(anchors), len(anchors), (anchors[0].shape, anchors[1].shape, anchors[2].shape)))    # list: 3 layer x ...
+        ('anchors', <class 'list'>, 3, (torch.Size([54, 2]), torch.Size([24, 2]), torch.Size([6, 2])))
+        """
 
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
