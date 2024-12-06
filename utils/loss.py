@@ -159,7 +159,7 @@ class ComputeLoss:
             - imgs.shape = torch.Size([2, 3, 640, 640])    # batch-size = 2
             - targets.shape = torch.Size([8, 6])
         >>> print(('p', type(p), len(p), (p[0].shape, p[1].shape, p[2].shape)))
-        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))    # list: 3layers x [torch.Size([batch-size, 3, 80, 80, (x,y,w,h,objectness-score,*5class-score)])];
+        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))    # list: 3layers x [torch.Size([batch-size, #anchor-boxes at each layer, grid-size, 80, (x,y,w,h,objectness-score,*5class-score)])];
         >>> pprint(('targets', targets.shape))
         ('targets', torch.Size([8, 6]))    # 8 boxes x (image,class,x,y,w,h)
         """
@@ -206,7 +206,7 @@ class ComputeLoss:
             """
             if n:
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+                pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # laptq: get predicted result at "the anchor-boxes that was assgined to GT boxes"
 
                 # laptq
                 """
@@ -245,7 +245,7 @@ class ComputeLoss:
                     b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
                 if self.gr < 1:            # laptq False
                     iou = (1.0 - self.gr) + self.gr * iou
-                tobj[b, a, gj, gi] = iou  # iou ratio
+                tobj[b, a, gj, gi] = iou  # iou ratio    # laptq: for the predicted result predicted result at "the anchor-boxes that was NOT assgined to GT boxes", the IoU shoule be zero.
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
