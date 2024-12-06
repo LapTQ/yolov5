@@ -138,6 +138,10 @@ class ComputeLoss:
 
         # laptq
         """ For a 5-class dataset
+        >>> pprint(('self.cp', self.cp))
+        ('self.cp', 1.0)
+        >>> pprint(('self.cn', self.cn))
+        ('self.cn', 0.0)
         >>> pprint(('na', self.na))
         ('na', 3)
         >>> pprint(('nc', self.nc))
@@ -151,8 +155,11 @@ class ComputeLoss:
 
         # laptq
         """ For a 5-class dataset
+        The dataloader yield:
+            - imgs.shape = torch.Size([2, 3, 640, 640])    # batch-size = 2
+            - targets.shape = torch.Size([8, 6])
         >>> print(('p', type(p), len(p), (p[0].shape, p[1].shape, p[2].shape)))
-        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))    # list: 3 layers x ...
+        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))    # list: 3layers x [torch.Size([batch-size, 3, 80, 80, (x,y,w,h,objectness-score,*5class-score)])];
         >>> pprint(('targets', targets.shape))
         ('targets', torch.Size([8, 6]))    # 8 boxes x (image,class,x,y,w,h)
         """
@@ -185,7 +192,18 @@ class ComputeLoss:
             b, a, gj, gi = indices[i]  # image, anchor, gridy, gridx
             tobj = torch.zeros(pi.shape[:4], dtype=pi.dtype, device=self.device)  # target obj
 
+            # laptq
+            """
+            >>> print(('tobj', tobj.shape))
+            ('tobj', torch.Size([2, 3, 80, 80]))
+            """
+
             n = b.shape[0]  # number of targets
+            # laptq
+            """
+            >>> print(('n', n))
+            ('n', 54)
+            """
             if n:
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
                 pxy, pwh, _, pcls = pi[b, a, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
@@ -199,31 +217,33 @@ class ComputeLoss:
                 >>> print(('pwh', pwh.shape))
                 ('pwh', torch.Size([54, 2]))
                 >>> print(('_', _.shape, (_.min().item(), _.max().item())))
-                ('_', torch.Size([54, 1]), (-7.35546875, -6.0))                            # objectness score???
+                ('_', torch.Size([54, 1]), (-7.35546875, -6.0))                            # objectness score
                 >>> print(('pcls', pcls.shape, (pcls.min().item(), pcls.max().item())))
-                ('pcls', torch.Size([54, 5]), (-2.505859375, -1.046875))                   # class score???
+                ('pcls', torch.Size([54, 5]), (-2.505859375, -1.046875))                   # class score
                 """
 
                 # Regression
                 pxy = pxy.sigmoid() * 2 - 0.5
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
+                iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
                 # laptq
                 """
                 >>> print(('pbox', pbox.shape))
                 ('pbox', torch.Size([54, 4]))
                 >>> print(('tbox[i]', tbox[i].shape))
                 ('tbox[i]', torch.Size([54, 4]))
+                >>> print(('iou', iou.shape, (iou.min().item(), iou.max().item())))
+                ('iou', torch.Size([54]), (-0.00167, 0.73278))
                 """
-                iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
                 lbox += (1.0 - iou).mean()  # iou loss
 
                 # Objectness
                 iou = iou.detach().clamp(0).type(tobj.dtype)
-                if self.sort_obj_iou:
+                if self.sort_obj_iou:      # laptq False
                     j = iou.argsort()
                     b, a, gj, gi, iou = b[j], a[j], gj[j], gi[j], iou[j]
-                if self.gr < 1:
+                if self.gr < 1:            # laptq False
                     iou = (1.0 - self.gr) + self.gr * iou
                 tobj[b, a, gj, gi] = iou  # iou ratio
 
@@ -231,13 +251,25 @@ class ComputeLoss:
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     t = torch.full_like(pcls, self.cn, device=self.device)  # targets
                     t[range(n), tcls[i]] = self.cp
+                    # laptq
+                    """
+                    >>> print(('t', t.shape, (t.min().item(), t.max().item())))
+                    ('t', torch.Size([54, 5]), (0.0, 1.0))
+                    """
                     lcls += self.BCEcls(pcls, t)  # BCE
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
-            obji = self.BCEobj(pi[..., 4], tobj)
+            obji = self.BCEobj(pi[..., 4], tobj)        # laptq pi[..., 4] is objectness score, obji is scalar
+            # laptq
+            """
+            >>> print(('pi[..., 4]', pi[..., 4].shape))
+            ('pi[..., 4]', torch.Size([2, 3, 80, 80]))
+            >>> print(('tobj', tobj.shape))
+            ('tobj', torch.Size([2, 3, 80, 80]))
+            """
             lobj += obji * self.balance[i]  # obj loss
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
