@@ -287,11 +287,39 @@ class ComputeLoss:
         """Prepares model targets from input targets (image,class,x,y,w,h) for loss computation, returning class, box,
         indices, and anchors.
         """
+
+        # laptq
+        """ For a 5-class dataset
+        The dataloader yield:
+            - imgs.shape = torch.Size([2, 3, 640, 640])    # batch-size = 2
+            - targets.shape = torch.Size([8, 6])
+        >>> print(('p', type(p), len(p), (p[0].shape, p[1].shape, p[2].shape)))
+        ('p', <class 'list'>, 3, (torch.Size([2, 3, 80, 80, 10]), torch.Size([2, 3, 40, 40, 10]), torch.Size([2, 3, 20, 20, 10])))
+        >>> print(('targets', targets.shape))
+        ('targets', torch.Size([8, 6]))    # 8 boxes x (image,class,x,y,w,h)
+        """
+        
         na, nt = self.na, targets.shape[0]  # number of anchors, targets
         tcls, tbox, indices, anch = [], [], [], []
         gain = torch.ones(7, device=self.device)  # normalized to gridspace gain
         ai = torch.arange(na, device=self.device).float().view(na, 1).repeat(1, nt)  # same as .repeat_interleave(nt)
-        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # append anchor indices
+        targets = torch.cat((targets.repeat(na, 1, 1), ai[..., None]), 2)  # laptq: append anchor indices to keep track
+
+        # laptq: It will, at each layer, assign a GT (target) box to every anchor-boxes that fits 
+        # (1 GT box can be assigned to many of these (3) anchor-boxes as long as the w,h fit) so we
+        # want to keep track of anchor-box indices
+
+        # laptq
+        """
+        >>> print(('ai', ai.shape, ai))
+        ('ai', torch.Size([3, 8]), tensor(
+               [[0., 0., 0., 0., 0., 0., 0., 0.],
+                [1., 1., 1., 1., 1., 1., 1., 1.],
+                [2., 2., 2., 2., 2., 2., 2., 2.]])
+        )
+        >>> print(('targets', targets.shape))
+        ('targets', torch.Size([3, 8, 7]))    # laptq: repeat targets 3 times corresponding to the number of anchor-boxes (3) for each layer
+        """
 
         g = 0.5  # bias
         off = (
@@ -309,39 +337,90 @@ class ComputeLoss:
             * g
         )  # offsets
 
-        for i in range(self.nl):
+        for i in range(self.nl):    # for each layers
             anchors, shape = self.anchors[i], p[i].shape
             gain[2:6] = torch.tensor(shape)[[3, 2, 3, 2]]  # xyxy gain
 
+            # laptq
+            """
+            >>> print(('anchors', anchors.shape))
+            ('anchors', torch.Size([3, 2]))        # 3 anchor-boxes for this layer
+            >>> print(('shape', shape))
+            ('shape', torch.Size([2, 3, 80, 80, 10]))
+            >>> print(('gain', gain))
+            ('gain', tensor([ 1.,  1., 80., 80., 80., 80.,  1.]))
+            """
+
             # Match targets to anchors
-            t = targets * gain  # shape(3,n,7)
+            t = targets * gain  # shape(3,n,7)    # laptq: scale GT boxes (range 0-1) to the layer's scale (80x80 in this example) 
             if nt:
                 # Matches
                 r = t[..., 4:6] / anchors[:, None]  # wh ratio
                 j = torch.max(r, 1 / r).max(2)[0] < self.hyp["anchor_t"]  # compare
+                # laptq
+                """
+                >>> print((t[..., 4:6].shape, anchors[:, None].shape))
+                (torch.Size([3, 8, 2]), torch.Size([3, 1, 2]))
+                >>> print(j.shape)
+                torch.Size([3, 8])
+                """
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
+
+                # laptq
+                """
+                >>> print(('t', t.shape))
+                ('t', torch.Size([18, 7]))
+                """
 
                 # Offsets
                 gxy = t[:, 2:4]  # grid xy
                 gxi = gain[[2, 3]] - gxy  # inverse
                 j, k = ((gxy % 1 < g) & (gxy > 1)).T
                 l, m = ((gxi % 1 < g) & (gxi > 1)).T
+                # laptq
+                """
+                >>> print(len(t), len(t[j]), len(t[k]), len(t[l]), len(t[m]))
+                18 5 1 13 17
+                """
                 j = torch.stack((torch.ones_like(j), j, k, l, m))
+                # laptq
+                """
+                >>> print(('j', j.shape))
+                ('j', torch.Size([5, 18]))
+                >>> print(('t.repeat((5, 1, 1))', t.repeat((5, 1, 1)).shape))
+                ('t.repeat((5, 1, 1))', torch.Size([5, 18, 7]))
+                """
                 t = t.repeat((5, 1, 1))[j]
+                # laptq
+                """
+                >>> print(('t', t.shape))
+                ('t', torch.Size([54, 7]))
+                """
                 offsets = (torch.zeros_like(gxy)[None] + off[:, None])[j]
             else:
                 t = targets[0]
                 offsets = 0
 
             # Define
-            bc, gxy, gwh, a = t.chunk(4, 1)  # (image, class), grid xy, grid wh, anchors
+            bc, gxy, gwh, a = t.chunk(4, 1)  # laptq: (image, class), grid xy, grid wh, anchor indices
+            # laptq
+            """
+            >>> print(('bc', bc.shape))
+            ('bc', torch.Size([54, 2]))
+            >>> print(('gxy', gxy.shape))
+            ('gxy', torch.Size([54, 2]))
+            >>> print(('gwh', gwh.shape))
+            ('gwh', torch.Size([54, 2]))
+            >>> print(('a', a.shape))
+            ('a', torch.Size([54, 1]))
+            """
             a, (b, c) = a.long().view(-1), bc.long().T  # anchors, image, class
             gij = (gxy - offsets).long()
             gi, gj = gij.T  # grid indices
 
             # Append
-            indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor, grid
+            indices.append((b, a, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, anchor indices, grid
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class
